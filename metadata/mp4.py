@@ -27,6 +27,8 @@ from calendar import timegm
 from .camm import *
 from .gpmd import *
 
+max_track_id = 0
+
 def since1904_to_seconds(dt):
     start = datetime.datetime.strptime('1904-1-1T00:00:00.000', '%Y-%m-%dT%H:%M:%S.%f')
     end = datetime.datetime.strptime(
@@ -227,7 +229,10 @@ class SttsBox(box.Box):
             out_fh.write(self.name)
         out_fh.write(struct.pack(">L", 0)) # version flags
         out_fh.write(struct.pack(">L", len(self.times))) # number of entries
+        #print("save stts times len", len(self.times),"header_size",self.header_size)        
+        
         for i in self.times:
+            #print("save stts times ", i[0], i[1])        
             out_fh.write(struct.pack(">L", i[0]))
             out_fh.write(struct.pack(">L", i[1]))
 
@@ -273,9 +278,9 @@ class StscBox(box.Box):
         new_box.header_size = 8
         new_box.name = constants.TAG_STSC
         new_box.version = 0                     # uint8
-        new_box.content_size += 4               # uint8
+        new_box.content_size += 4               # version flags
 
-        new_box.content_size += 4
+        new_box.content_size += 4               # number of entries
 
         for i in frames:
             new_box.content_size += 4
@@ -352,9 +357,9 @@ class StszBox(box.Box):
         new_box.header_size = 8
         new_box.name = constants.TAG_STSZ
         new_box.version = 0                     # uint8
-        new_box.content_size += 4               # uint8
-        new_box.content_size += 4
-        new_box.content_size += 4
+        new_box.content_size += 4               # version flags
+        new_box.content_size += 4               # block_size
+        new_box.content_size += 4               # number of entries
 
         for i in sizes:
             new_box.content_size += 4
@@ -377,7 +382,7 @@ class StszBox(box.Box):
             out_fh.write(struct.pack(">I", self.size()))
             out_fh.write(self.name)
         out_fh.write(struct.pack(">I", 0)) # version flags
-        out_fh.write(struct.pack(">L", 0)) # number of entries
+        out_fh.write(struct.pack(">L", 0)) # block_size
         out_fh.write(struct.pack(">L", len(self.sizes))) # number of entries
 
         for i in self.sizes:
@@ -424,9 +429,9 @@ class StcoBox(box.Box):
         new_box.header_size = 8
         new_box.name = b'stco'
         new_box.version = 0                     # uint8
-        new_box.content_size += 4               # uint8
+        new_box.content_size += 4               # version flags
 
-        new_box.content_size += 4
+        new_box.content_size += 4               # number of entries
 
         for i in offsets:
             new_box.content_size += 4
@@ -1074,6 +1079,7 @@ class TkhdBox(box.Box):
         self.track_height = 0
 
     def load(self, in_fh, position):
+        global max_track_id
         if position is None:
             position = in_fh.tell()
 
@@ -1091,6 +1097,9 @@ class TkhdBox(box.Box):
             self.modification_time = struct.unpack(">I", in_fh.read(4))[0]
             #self.modification_time = since1904(self.modification_time)
             track_id = struct.unpack(">I", in_fh.read(4))[0]
+            if track_id > max_track_id:
+                max_track_id = track_id
+            #print("tkhd load","track_id", track_id, "max_track_id", max_track_id)
             self.track_id = track_id
             self.reserved = struct.unpack(">d", in_fh.read(8))[0]
             duration = struct.unpack(">I", in_fh.read(4))[0]
@@ -1143,7 +1152,7 @@ class TkhdBox(box.Box):
         new_box.content_size += 4
         new_box.reserved = 0
         new_box.content_size += 8
-        new_box.duration = 2200
+        new_box.duration = 0             #zorro:updated later
         new_box.content_size += 4
         new_box.reserved1 = 0
         new_box.content_size += 4
@@ -1339,38 +1348,24 @@ class EdtsBox(container.Container):
             position = in_fh.tell()
 
         in_fh.seek(position)
-        z = in_fh.read(32)
+        header = in_fh.read(32)
         in_fh.seek(position)
 
         header = in_fh.read(self.header_size)
         header_size = struct.unpack(">I", header[0:4])[0]
         header_name = header[4:8]
 
-        header = in_fh.read(self.header_size)
-        header_size = struct.unpack(">I", header[0:4])[0]
-        header_name = header[4:8]
-
-        header = in_fh.read(4)
-        header = in_fh.read(4)
-        header_size = struct.unpack(">I", header[0:4])[0]
-
-        header = in_fh.read(4)
-        header_size = struct.unpack(">L", header[0:4])[0]
-
-        header = in_fh.read(4)
-        header_size = struct.unpack(">L", header[0:4])[0]
-
-        header = in_fh.read(4)
-        header_size = struct.unpack(">L", header[0:4])[0]
-
+        #load elst
+        print("load elst")
+        elst = ElstBox()
+        elst.load(in_fh, position)
+        self.contents.append(elst)
 
     @staticmethod
-    def create():
+    def create(duration):
         new_box = EdtsBox()
         new_box.header_size = 8
         new_box.name = constants.TAG_EDTS
-        elst = ElstBox.create()
-        new_box.contents.append(elst)
         return new_box
 
     def print_box(self, console):
@@ -1380,21 +1375,31 @@ class EdtsBox(container.Container):
         return ""
         pass
 
-    def save(self, in_fh, out_fh, delta):
-        pass
-
+    def save(self, in_fh, out_fh, delta):  
+        #print("edts save", "size", self.size())
+        if (self.header_size == 16):
+            out_fh.write(struct.pack(">I", 1))
+            out_fh.write(struct.pack(">Q", self.size()))
+            out_fh.write(self.name)
+        elif(self.header_size == 8):
+            out_fh.write(struct.pack(">I", self.size()))
+            out_fh.write(self.name) 
+        if len(self.contents)>0:
+            self.contents[0].save(in_fh, out_fh, delta)
+            
 class ElstBox(box.Box):
 
     def __init__(self):
         box.Box.__init__(self)
         self.name = b'elst'
         self.header_size = 8
-        self.version = 0
+        self.version = 0       #1byte+3bytes flags, should be 0 if delay = 0
         self.number_of_entries = 0
         self.entries = []
         self.track_duration = 0
         self.media_time = 0
         self.media_rate = 0
+
     def load(self, in_fh, position):
         if position is None:
             position = in_fh.tell()
@@ -1419,7 +1424,7 @@ class ElstBox(box.Box):
                 self.entries.append([track_duration, media_time, media_rate])
 
     @staticmethod
-    def create():
+    def create(duration):
         new_box = ElstBox()
         new_box.header_size = 8
         new_box.name = b'elst'
@@ -1427,7 +1432,7 @@ class ElstBox(box.Box):
         new_box.content_size += 4               # uint8
         new_box.number_of_entries = 1
         new_box.content_size += 4
-        new_box.track_duration = 0
+        new_box.track_duration = duration
         new_box.content_size += 4
         new_box.media_time = 0
         new_box.content_size += 4
@@ -1442,7 +1447,8 @@ class ElstBox(box.Box):
         return ""
         pass
 
-    def save(self, in_fh, out_fh, delta):
+    def save(self, in_fh, out_fh, delta):  
+        #print("elst save", "size", self.size())   
         if (self.header_size == 16):
             out_fh.write(struct.pack(">I", 1))
             out_fh.write(struct.pack(">Q", self.size()))
@@ -1450,11 +1456,11 @@ class ElstBox(box.Box):
         elif(self.header_size == 8):
             out_fh.write(struct.pack(">I", self.size()))
             out_fh.write(self.name)
-        out_fh.write(struct.pack(">I", self.version)) # version flags
-        out_fh.write(struct.pack(">I", self.number_of_entries)) # version flags
-        out_fh.write(struct.pack(">I", self.track_duration)) # version flags
-        out_fh.write(struct.pack(">I", self.media_time)) # version flags
-        out_fh.write(struct.pack(">I", self.media_rate)) # version flags
+        out_fh.write(struct.pack(">I", self.version))            # version flags
+        out_fh.write(struct.pack(">I", self.number_of_entries)) 
+        out_fh.write(struct.pack(">I", self.track_duration)) 
+        out_fh.write(struct.pack(">I", self.media_time)) 
+        out_fh.write(struct.pack(">I", self.media_rate)) 
 
 class DinfBox(box.Box):
 
@@ -1864,6 +1870,8 @@ class Mp4Atom():
         return metadata"""
 
     def create_camm_metadata_atoms(self, f, mdata, framerate):
+        global max_track_id
+        max_track_id = 0
         mp4_st = mpeg4_container.load(f)
         mp4_st.print_structure()
         mp4 = Mp4Atom()
@@ -1908,7 +1916,8 @@ class Mp4Atom():
         for m in metadatas:
             data += m['metadata']
             l = len(m['metadata'])
-            d = int(timescale/framerate)
+            d = int(timescale/framerate)  #zorro: TBD, it should be better if using duration from gps time directly
+            #print("times","len", l, "duration", d)
             times.append([1, d])
             sizes.append(l)
             offsets.append(m_pos)
@@ -1957,8 +1966,8 @@ class Mp4Atom():
         tkhd = TkhdBox.create()
         tkhd.creation_time = start_time
         tkhd.modification_time = start_time
-
-        edts = EdtsBox.create()
+        tkhd.track_id = max_track_id + 1
+        edts = EdtsBox.create(int(metadata_duration * timescale))
 
         mdia = mpeg.Container()
         mdia.header_size = 8
@@ -1992,6 +2001,8 @@ class Mp4Atom():
         mdia.add(minf)
         mdia.resize()
         trak.add(tkhd)
+        trak.add(edts)
+        
         trak.add(mdia)
         trak.resize()
         moov.contents.append(trak)
@@ -1999,6 +2010,8 @@ class Mp4Atom():
         return mp4_st
 
     def create_gpmd_metadata_atoms(self, f, mdata, framerate):
+        global max_track_id
+        max_track_id = 0
         mp4_st = mpeg4_container.load(f)
         mp4_st.print_structure()
         mp4 = Mp4Atom()
@@ -2022,7 +2035,7 @@ class Mp4Atom():
         i = 1      
         d = 0
         data = b''
-        times = [[1, 0]]
+        times = [] #zorro: do not need [[1, 0]]
         sizes = []
         frames = []
         offsets = []
@@ -2030,6 +2043,7 @@ class Mp4Atom():
         timescale = 1000
         metadatas = mdata['metadata']
         metadata_duration = mdata['duration']
+        duration_in_timescale=int(metadata_duration*timescale)
         start_time = int(since1904_to_seconds(mdata['start_time']))
 
         mdat_size = mdat.size()-8
@@ -2038,6 +2052,14 @@ class Mp4Atom():
         m_pos = mdat.position + mdat_size+8
         print('pos', m_pos)
 
+        #print('timescale', timescale)
+        #print('gpmd framerate', framerate)
+        #print('metadatas', metadatas)
+        #print('metadata_duration', metadata_duration)
+        #print('duration_in_timescale', duration_in_timescale)
+        #print('start_time', start_time)
+         
+        
         mp4_st.resize()
         moov.resize()
         mp4_st.resize()
@@ -2046,8 +2068,12 @@ class Mp4Atom():
             data += m['metadata']
             l = len(m['metadata'])
             d = int(timescale/framerate)
-            print('pos', m_pos, m['metadata'])
-            times.append([1, d])
+            #print("stts times","len", l, "duration", d)
+            times_last_len = len(times)
+            if (times_last_len>0) and (d==times[times_last_len-1][1]):
+                times[times_last_len-1][0]+=1
+            else:
+                times.append([1, d])
             sizes.append(l)
             offsets.append(m_pos)
             m_pos += l
@@ -2097,8 +2123,14 @@ class Mp4Atom():
         tkhd = TkhdBox.create()
         tkhd.creation_time = start_time
         tkhd.modification_time = start_time
+        tkhd.duration = duration_in_timescale
 
-        edts = EdtsBox.create()
+        tkhd.track_id = max_track_id+1
+        print("tkhd", "track_id", tkhd.track_id, "duration", tkhd.duration, "creation_time", tkhd.creation_time)
+        
+        edts = EdtsBox.create(duration_in_timescale)
+        elst = ElstBox.create(duration_in_timescale)
+        edts.contents.append(elst)
 
         mdia = mpeg.Container()
         mdia.header_size = 8
@@ -2109,6 +2141,9 @@ class Mp4Atom():
         mdhd.duration = int(metadata_duration * timescale)
         mdhd.creation_time = start_time
         mdhd.modification_time = start_time
+
+        print("mdhd", "time_scale",mdhd.time_scale, "duration",mdhd.duration, "creation_time",mdhd.creation_time)
+
 
         hdlr = HdlrBox.create()
         hdlr.quicktime_type = b'mhlrmeta'
@@ -2151,7 +2186,10 @@ class Mp4Atom():
         mdia.resize()
         mdia.add(minf)
         mdia.resize()
+        edts.resize()
+
         trak.add(tkhd)
+        trak.add(edts)
         trak.add(mdia)
         trak.resize()
 

@@ -32,12 +32,17 @@ def main():
     parser.add_argument("-i", "--images-directory", help="image directory to make video file from.")
 
     parser.add_argument("-x", "--gpx", help="gpx file")
+    
+    
+    #framerate = 5
+    framerate = 1
+    help_frame_str ="gpx frame rate[default "+str(framerate)+"]"
+    parser.add_argument("-f", "--gpxframerate", help=help_frame_str)
 
     parser.add_argument("-o", "--output", help="output file")
 
     args = parser.parse_args()
 
-    framerate = 5
 
     if args.inject_camm_metadata or args.inject_gpmd_metadata:
         metadata = b''
