@@ -12,11 +12,21 @@ import gpxpy.gpx
 
 from .gpmd_klvs import pack_klv
 
+from collections import Counter
+
 def since1904(seconds):
     return datetime.datetime(1904, 1, 1, 0, 0, 0, 0) + datetime.timedelta(seconds=seconds)
 
 def getTimeBySeconds(seconds):
     return datetime.datetime.strftime(since1904(seconds), "%H:%M:%S")
+
+def find_most_frequent(arr):
+    if not arr:  
+        return None
+    count = Counter(arr)
+    max_count = max(count.values())
+    max_elements = [k for k, v in count.items() if v == max_count]
+    return max(max_elements)
 
 class Gpmf(object):
     
@@ -132,6 +142,7 @@ def get_gpx_data(gpx_file):
         metadatas = []
         point_time = None
         data = {'metadata':[], 'duration': 0.0}
+        times_arr=[]
         for track in g.tracks:
             for segment in track.segments:
                 for point in segment.points:
@@ -291,19 +302,22 @@ def get_gpx_data(gpx_file):
                     if point_time is None:
                         point_time = point.time
                         first_time = point.time
-                    
-                    metadata_time = "{0:.06}".format(point.time.timestamp() - point_time.timestamp())
+                    time_val = point.time.timestamp() - point_time.timestamp()
+                    metadata_time = "{0:.06}".format(time_val)
                     metadatas.append({
                         'metadata': d,
                         'time': metadata_time
                     })
-                    
+                    times_arr.append(time_val)
                     point_time = point.time
                     
                     
         total_seconds = 0.0
         if point_time is not None:
             total_seconds = (point_time - first_time).total_seconds()
+            mostly_time = find_most_frequent(times_arr)
+            metadatas[0]['time'] = "{0:.06}".format(mostly_time)   # update item 0 time
+            total_seconds += mostly_time                           # update total_seconds
         data['metadata'] = metadatas
         data['duration'] = total_seconds
         data['start_time'] = first_time

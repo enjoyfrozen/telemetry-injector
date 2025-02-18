@@ -35,7 +35,7 @@ def main():
     
     
     #framerate = 5
-    framerate = 1
+    framerate = 0
     help_frame_str ="gpx frame rate[default "+str(framerate)+"]"
     parser.add_argument("-f", "--gpxframerate", help=help_frame_str)
 

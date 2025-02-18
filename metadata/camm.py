@@ -10,6 +10,8 @@ import xml.etree.ElementTree as ET
 import gpxpy
 import gpxpy.gpx
 
+from .gpmd import find_most_frequent
+
 class CammMetadataCase0():
     angle_axis_1 = 0.0 # float
     angle_axis_2 = 0.0 # float
@@ -366,6 +368,10 @@ def get_gpx_data(gpx_file):
     total_seconds = 0.0
     if point_time is not None:
         total_seconds = (point_time - first_time).total_seconds()
+        mostly_time = find_most_frequent(times_arr)
+        metadatas[0]['time'] = "{0:.06}".format(mostly_time)   # update item 0 time
+        total_seconds += mostly_time   
+
     data['metadata'] = metadatas
     data['duration'] = total_seconds
     data['start_time'] = first_time

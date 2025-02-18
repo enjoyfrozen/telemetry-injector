@@ -1910,18 +1910,21 @@ class Mp4Atom():
         metadata_duration = mdata['duration']
         start_time = int(since1904_to_seconds(mdata['start_time']))
 
+
         mp4_st.resize()
         moov.resize()
         mp4_st.resize()
         for m in metadatas:
             data += m['metadata']
             l = len(m['metadata'])
-            d = int(timescale/framerate)  #zorro: TBD, it should be better if using duration from gps time directly
-            #print("times","len", l, "duration", d)
+            if framerate>0:
+                d = int(timescale/framerate)
+            else:
+                d = int(float(m['time'])*timescale) 
             times.append([1, d])
             sizes.append(l)
             offsets.append(m_pos)
-            print('m_pos', m_pos, m['metadata'])
+            #print("stts times", i, "len", l, "duration", d, m['time'], "pos", m_pos)
             m_pos += l
             frames.append([i,1, 1])
             i += 1
@@ -2067,13 +2070,13 @@ class Mp4Atom():
             
             data += m['metadata']
             l = len(m['metadata'])
-            d = int(timescale/framerate)
-            #print("stts times","len", l, "duration", d)
-            times_last_len = len(times)
-            if (times_last_len>0) and (d==times[times_last_len-1][1]):
-                times[times_last_len-1][0]+=1
+            if framerate>0:
+                d = int(timescale/framerate)
             else:
-                times.append([1, d])
+                d = int(float(m['time'])*timescale) 
+            #print("stts times", i, "len", l, "duration", d, m['time'], "pos", m_pos)
+
+            times.append([1, d])
             sizes.append(l)
             offsets.append(m_pos)
             m_pos += l
